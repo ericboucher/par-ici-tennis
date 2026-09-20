@@ -1,18 +1,40 @@
 import { chromium } from 'playwright'
 import dayjs from 'dayjs'
 import customParseFormat from 'dayjs/plugin/customParseFormat.js'
+import utc from 'dayjs/plugin/utc.js'
+import timezone from 'dayjs/plugin/timezone.js'
 import { writeFileSync } from 'fs'
 import { createEvent } from 'ics'
 import { config } from './staticFiles.js'
-import { notify } from './lib/ntfy.js'
+import { notify, notifyText } from './lib/ntfy.js'
+import { waitUntilBookingTime } from './lib/waitUntilBookingTime.js'
+import { resolveBookingDate } from './lib/resolveBookingDate.js'
 
 dayjs.extend(customParseFormat)
+dayjs.extend(utc)
+dayjs.extend(timezone)
+
+const PARIS_TZ = 'Europe/Paris'
+
+const ntfyConfig = () => ({
+  domain: config?.ntfy?.domain || process.env.NTFY_DOMAIN,
+  topic: config?.ntfy?.topic || process.env.NTFY_TOPIC,
+})
+
+const ntfyEnabled = () => config.ntfy?.enable === true || Boolean(process.env.NTFY_TOPIC)
 
 const bookTennis = async () => {
   const DRY_RUN_MODE = process.argv.includes('--dry-run')
+  const WAIT_MODE = process.argv.includes('--wait')
   if (DRY_RUN_MODE) {
     console.log('----- DRY RUN START -----')
     console.log('Script lancé en mode DRY RUN. Afin de tester votre configuration, une recherche va être lancé mais AUCUNE réservation ne sera réalisée')
+  }
+
+  const { date, skipped, reason } = resolveBookingDate(config)
+  if (skipped) {
+    console.log(`${dayjs().format()} - ${reason}`)
+    return
   }
 
   console.log(`${dayjs().format()} - Starting searching tennis`)
@@ -35,6 +57,18 @@ const bookTennis = async () => {
   // wait for login redirection before continue
   await page.waitForSelector('.main-informations')
 
+  // Login early, then wait until 08:00 so we book right as slots open
+  if (WAIT_MODE) {
+    const now = dayjs().tz(PARIS_TZ)
+    const openTime = now.hour(8).minute(0).second(0).millisecond(0)
+    if (now.isAfter(openTime) && ntfyEnabled()) {
+      const message = `Late start: ready at ${now.format('HH:mm:ss')} Paris — already past 08:00, booking immediately`
+      console.log(message)
+      await notifyText(message, ntfyConfig(), { title: 'Paris Tennis — late start', tags: 'warning,alarm_clock' })
+    }
+    await waitUntilBookingTime(date)
+  }
+
   try {
     const locations = !Array.isArray(config.locations) ? Object.keys(config.locations) : config.locations
     locationsLoop:
@@ -50,7 +84,6 @@ const bookTennis = async () => {
 
       // select date
       await page.click('#when')
-      const date = config.date ? dayjs(config.date, 'D/MM/YYYY') : dayjs().add(6, 'days')
       await page.waitForSelector(`[dateiso="${date.format('DD/MM/YYYY')}"]`)
       await page.click(`[dateiso="${date.format('DD/MM/YYYY')}"]`)
       await page.waitForSelector('.date-picker', { state: 'hidden' })
@@ -174,12 +207,9 @@ const bookTennis = async () => {
       if (!process.env.GITHUB_ACTIONS) {
         writeFileSync('event.ics', value)
       }
-      if (config.ntfy?.enable === true || process.env.NTFY_TOPIC) {
+      if (ntfyEnabled()) {
         await notify(Buffer.from(value, 'utf8'), 'event.ics',
-          `Confirmation pour le ${date.format('DD/MM/YYYY')} - ${hour}h`, {
-            domain: config?.ntfy?.domain || process.env.NTFY_DOMAIN,
-            topic: config?.ntfy?.topic || process.env.NTFY_TOPIC,
-          })
+          `Confirmation pour le ${date.format('DD/MM/YYYY')} - ${hour}h`, ntfyConfig())
       }
 
       break
@@ -188,11 +218,8 @@ const bookTennis = async () => {
     console.log(e)
     const screenshot = await page.screenshot({ path: 'img/failure.png' })
 
-    if (config.ntfy?.enable === true || process.env.NTFY_TOPIC) {
-      await notify(screenshot, 'failure.png', 'Erreur lors de l\'execution du programme.', {
-        domain: config?.ntfy?.domain || process.env.NTFY_DOMAIN,
-        topic: config?.ntfy?.topic || process.env.NTFY_TOPIC,
-      })
+    if (ntfyEnabled()) {
+      await notify(screenshot, 'failure.png', 'Erreur lors de l\'execution du programme.', ntfyConfig())
     }
   }
 

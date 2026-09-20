@@ -24,6 +24,7 @@
     "start": "node index.js",
     "start-dry": "node index.js --dry-run",
     "wait": "node scripts/wait-8-am.js",
+    "start-wait": "node index.js --wait",
     "eslint": "eslint ."
   },
   "dependencies": {

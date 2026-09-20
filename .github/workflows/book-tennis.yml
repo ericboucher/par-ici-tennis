@@ -2,22 +2,21 @@ name: Tennis booking
 
 on:
   schedule:
-    # Run 15 minutes early to account for possible delays in GitHub Actions scheduling.
-    - cron: '45 7 * * *'
+    # Start ~20 min early so login is done before 08:00; script waits precisely.
+    - cron: '40 7 * * *'
       timezone: 'Europe/Paris'
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: write # to disable this workflow after it runs
 
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
-  run-once:
-    name: Run script at 08:00 Europe/Paris and self-disable
+  book:
+    name: Login early, book at 08:00 Europe/Paris
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -55,27 +54,15 @@ jobs:
       - name: Install Playwright browser (only-shell)
         run: npx playwright install chromium --only-shell
 
-      - name: Wait 08:00 Europe/Paris
-        if: github.event_name == 'schedule'
-        run: npm run wait
-
       - name: Run script
         env:
           ACCOUNT_EMAIL: ${{ secrets.ACCOUNT_EMAIL }}
           ACCOUNT_PASSWORD: ${{ secrets.ACCOUNT_PASSWORD }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_DOMAIN: ${{ secrets.NTFY_DOMAIN }}
-        run: npm start
-
-      - name: Self-disable this workflow (GitHub CLI)
-        if: always()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          echo "GitHub CLI version:" && gh --version
-          echo "Disabling workflow using gh..."
-          # Disable this workflow so it won't run automatically the next day
-          gh workflow disable .github/workflows/book-tennis.yml
-          echo "Workflow disabled. Re-enable it manually from the Actions tab when needed."
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            npm start -- --wait
+          else
+            npm start
+          fi

@@ -54,7 +54,10 @@ You can use two formats for the `locations` field:
 
 Choose the format that best matches your preferences.
 
-- `date` (optional) a string representing a date formatted D/M/YYYY, do not set the date to automatically book 6 days in the future as soon as the reservation slots open
+- `date` (optional) a string representing a date formatted D/M/YYYY. Prefer omitting it to always book **6 days ahead** as soon as slots open
+- `day` (optional) weekday name (`friday` / `vendredi`, …). With no `date`, only books when D+6 is that weekday (useful for daily CI). Ignored if `date` is set
+
+See [doc/tennis-sites.md](doc/tennis-sites.md) for location names by arrondissement.
 
 - `hours` a list of hours ordered by preference
 
@@ -121,9 +124,7 @@ You can start the script automatically using cron or equivalent
 #### <ins>Using GitHub Actions (beta)</ins>
 
 > [!IMPORTANT]
-> Due to GitHub Actions limitations during high load on their servers, scheduled triggers may not run exactly at 08:00. Improvements are in progress to make the booking more reliable even with a slight delay.
->
-> For perfect timing, consider using your [own server or computer](#On-your-machine).
+> GitHub Actions scheduled triggers can start a few minutes late. The workflow therefore starts at **07:40** Paris time, logs in early, then waits until **08:00** before searching — so booking fires right as slots open. If login finishes **after 08:00**, an ntfy late-start warning is sent (needs `NTFY_TOPIC` / ntfy config).
 
 You can automate the booking using GitHub Actions workflows. The repository includes pre-configured workflows:
 
@@ -137,14 +138,21 @@ You can automate the booking using GitHub Actions workflows. The repository incl
      - `NTFY_TOPIC`: (optional) your ntfy topic for notifications
      - `NTFY_DOMAIN`: (optional) custom ntfy server domain if you don't use `ntfy.sh`
    - Add a **variable**:
-     - `CONFIG_JSON`: the content of your `config.json` file (⚠️ without account credentials and ntfy config for security reasons). Without date line to always book 6 days in advance
+     - `CONFIG_JSON`: the content of your `config.json` file (⚠️ without account credentials and ntfy config — use secrets instead). Omit `date`; use `day` if you only want one weekday (e.g. `"day": "friday"` → books on Saturdays when Friday opens)
 
 3. **Enable workflow:**
-   - The day before you want to execute the script, go to the Actions tab and enable the `Tennis booking` workflow
-   - The workflow runs the following day at 08:00 Paris time and automatically disables itself after running to avoid restarting on subsequent days
-   - Manually re-enable it from the Actions tab when you need to book again
+   - Go to the Actions tab and enable the `Tennis booking` workflow
+   - It runs **daily** at 07:40 Paris time: login → wait until 08:00 → book
+   - Late start (ready after 08:00) → ntfy warning if configured
+   - Manual runs (`workflow_dispatch`) skip the wait and book immediately
 
 To test Github Actions config you can start `Tennis booking dry-run` workflow manually. It will check court availability but no reservations will be made.
+
+Locally, same timing behaviour:
+
+```sh
+npm run start-wait
+```
 
 ## Contributing
 
